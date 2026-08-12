@@ -19,11 +19,18 @@ export interface DbStatusInfo {
   user: string;
   message: string;
   error?: string;
+  tableError?: string;
+  tablesStatus?: {
+    products: boolean;
+    categories: boolean;
+    suppliers: boolean;
+    movements: boolean;
+  };
 }
 
 // In-memory / local fallback storage
 let localCategories = [
-  { id: 'cat-1', name: 'Eletrônicos', description: 'Componentes e dispositivos eletrônicos', color: '#3b82f6', created_at: new Date().toISOString() },
+  { id: 'cat-1', name: 'Eletrônicos', description: 'Componentes e dispositivos eletrônicos', color: '#4f46e5', created_at: new Date().toISOString() },
   { id: 'cat-2', name: 'Escritório', description: 'Materiais e suprimentos para escritório', color: '#10b981', created_at: new Date().toISOString() },
   { id: 'cat-3', name: 'Informática', description: 'Periféricos e computadores', color: '#8b5cf6', created_at: new Date().toISOString() },
   { id: 'cat-4', name: 'Embalagens', description: 'Caixas, fitas e proteção', color: '#f59e0b', created_at: new Date().toISOString() },
@@ -59,7 +66,7 @@ let localProducts = [
     category_id: 'cat-3',
     supplier_id: 'sup-1',
     quantity: 8,
-    min_quantity: 15, // Low stock!
+    min_quantity: 15,
     unit_cost: 35.00,
     sale_price: 79.90,
     unit_measure: 'UN',
@@ -74,7 +81,7 @@ let localProducts = [
     description: 'Papel de alta alvura para impressões do dia a dia',
     category_id: 'cat-2',
     supplier_id: 'sup-2',
-    quantity: 0, // Out of stock!
+    quantity: 0,
     min_quantity: 20,
     unit_cost: 22.50,
     sale_price: 32.90,
@@ -117,7 +124,19 @@ let localProducts = [
   }
 ];
 
-let localMovements = [
+let localMovements: Array<{
+  id: string;
+  product_id: string;
+  product_name: string;
+  product_sku?: string;
+  type: 'ENTRADA' | 'SAIDA' | 'AJUSTE';
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+  reason: string;
+  user_name: string;
+  created_at: string;
+}> = [
   {
     id: 'mov-1',
     product_id: 'prod-1',
@@ -165,17 +184,39 @@ let currentMode: 'postgres' | 'mysql' | 'local_fallback' = 'local_fallback';
 let dbConnectionError: string | undefined = undefined;
 
 export function getDbConfigFromEnv(): DbConfig {
-  const host = process.env.DB_HOST || process.env.DATABASE_HOST || '';
-  const portStr = process.env.DB_PORT || process.env.DATABASE_PORT || '5432';
-  const database = process.env.DB_NAME || process.env.DATABASE_NAME || '';
-  const user = process.env.DB_USER || process.env.DATABASE_USER || '';
-  const password = process.env.DB_PASSWORD || process.env.DATABASE_PASSWORD || '';
-  const typeStr = (process.env.DB_TYPE || 'postgres').toLowerCase();
+  let host = process.env.DB_HOST || process.env.DATABASE_HOST || '';
+  let portStr = process.env.DB_PORT || process.env.DATABASE_PORT || '';
+  let database = process.env.DB_NAME || process.env.DATABASE_NAME || '';
+  let user = process.env.DB_USER || process.env.DATABASE_USER || '';
+  let password = process.env.DB_PASSWORD || process.env.DATABASE_PASSWORD || '';
+  let typeStr = (process.env.DB_TYPE || '').toLowerCase();
+
+  const dbUrl = process.env.DATABASE_URL || process.env.DB_URL || process.env.POSTGRES_URL || process.env.MYSQL_URL || '';
+
+  if (dbUrl && (!host || !database)) {
+    try {
+      const parsed = new URL(dbUrl);
+      if (parsed.protocol.includes('mysql')) {
+        typeStr = 'mysql';
+      } else {
+        typeStr = 'postgres';
+      }
+      host = host || parsed.hostname;
+      portStr = portStr || parsed.port;
+      database = database || parsed.pathname.replace(/^\//, '');
+      user = user || parsed.username;
+      password = password || parsed.password;
+    } catch (e) {
+      console.warn('Erro ao ler DATABASE_URL do .env:', e);
+    }
+  }
+
   const type: 'postgres' | 'mysql' = typeStr.includes('mysql') ? 'mysql' : 'postgres';
+  const defaultPort = type === 'mysql' ? 3306 : 5432;
 
   return {
     host: host.trim(),
-    port: parseInt(portStr, 10) || (type === 'mysql' ? 3306 : 5432),
+    port: parseInt(portStr, 10) || defaultPort,
     database: database.trim(),
     user: user.trim(),
     password: password.trim(),
@@ -212,28 +253,55 @@ export async function initDatabaseConnection(): Promise<DbStatusInfo> {
   }
 
   if (config.type === 'postgres') {
-    try {
+    const isLocal = config.host === 'localhost' || config.host === '127.0.0.1' || config.host === '::1';
+    
+    // First attempt with SSL if remote or DB_SSL=true, or fallback to non-SSL
+    const tryPgConnect = async (useSsl: boolean) => {
       const pool = new pg.Pool({
         host: config.host,
         port: config.port,
         database: config.database,
         user: config.user,
         password: config.password,
-        connectionTimeoutMillis: 5000,
+        connectionTimeoutMillis: 7000,
         idleTimeoutMillis: 10000,
-        ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false
+        ssl: useSsl ? { rejectUnauthorized: false } : false
       });
 
-      // Test connection
       const client = await pool.connect();
       await client.query('SELECT 1');
       client.release();
+      return pool;
+    };
+
+    try {
+      let pool: pg.Pool;
+      const shouldUseSsl = process.env.DB_SSL === 'true' || (!isLocal && process.env.DB_SSL !== 'false');
+      
+      try {
+        pool = await tryPgConnect(shouldUseSsl);
+      } catch (firstErr: any) {
+        // Fallback retry with inverted SSL setting if SSL was rejected
+        if (!shouldUseSsl) {
+          pool = await tryPgConnect(true);
+        } else {
+          pool = await tryPgConnect(false);
+        }
+      }
 
       pgPool = pool;
       currentMode = 'postgres';
 
-      // Auto create tables for PostgreSQL
-      await autoCreatePgTables(pool);
+      // Auto create tables for PostgreSQL & get detailed table status
+      let tableErrorMsg: string | undefined;
+      let tablesStatus: any;
+
+      try {
+        tablesStatus = await autoCreatePgTables(pool);
+      } catch (tErr: any) {
+        tableErrorMsg = tErr.message || String(tErr);
+        console.error('Erro na criação automática das tabelas PostgreSQL:', tableErrorMsg);
+      }
 
       return {
         connected: true,
@@ -242,7 +310,9 @@ export async function initDatabaseConnection(): Promise<DbStatusInfo> {
         port: config.port || 5432,
         database: config.database,
         user: config.user,
-        message: `Conectado com sucesso ao servidor PostgreSQL (${config.host}:${config.port}/${config.database})`
+        message: `Conectado com sucesso ao servidor PostgreSQL (${config.host}:${config.port}/${config.database})`,
+        tableError: tableErrorMsg,
+        tablesStatus
       };
     } catch (err: any) {
       dbConnectionError = err.message || String(err);
@@ -255,7 +325,7 @@ export async function initDatabaseConnection(): Promise<DbStatusInfo> {
         port: config.port || 5432,
         database: config.database,
         user: config.user,
-        message: `Falha ao conectar ao PostgreSQL no IP ${config.host}:${config.port}. Operando em modo local.`,
+        message: `Falha ao conectar ao PostgreSQL no host ${config.host}:${config.port}. Verifique o IP, porta, credenciais e liberação de firewall.`,
         error: dbConnectionError
       };
     }
@@ -268,17 +338,25 @@ export async function initDatabaseConnection(): Promise<DbStatusInfo> {
         database: config.database,
         user: config.user,
         password: config.password,
-        connectTimeout: 5000,
+        connectTimeout: 7000,
         waitForConnections: true,
         connectionLimit: 10
       });
 
-      const [rows] = await pool.query('SELECT 1');
+      await pool.query('SELECT 1');
       mysqlPool = pool;
       currentMode = 'mysql';
 
       // Auto create tables for MySQL
-      await autoCreateMysqlTables(pool);
+      let tableErrorMsg: string | undefined;
+      let tablesStatus: any;
+
+      try {
+        tablesStatus = await autoCreateMysqlTables(pool, config.database);
+      } catch (tErr: any) {
+        tableErrorMsg = tErr.message || String(tErr);
+        console.error('Erro na criação automática das tabelas MySQL:', tableErrorMsg);
+      }
 
       return {
         connected: true,
@@ -287,7 +365,9 @@ export async function initDatabaseConnection(): Promise<DbStatusInfo> {
         port: config.port || 3306,
         database: config.database,
         user: config.user,
-        message: `Conectado com sucesso ao servidor MySQL (${config.host}:${config.port}/${config.database})`
+        message: `Conectado com sucesso ao servidor MySQL (${config.host}:${config.port}/${config.database})`,
+        tableError: tableErrorMsg,
+        tablesStatus
       };
     } catch (err: any) {
       dbConnectionError = err.message || String(err);
@@ -300,7 +380,7 @@ export async function initDatabaseConnection(): Promise<DbStatusInfo> {
         port: config.port || 3306,
         database: config.database,
         user: config.user,
-        message: `Falha ao conectar ao MySQL no IP ${config.host}:${config.port}. Operando em modo local.`,
+        message: `Falha ao conectar ao MySQL no host ${config.host}:${config.port}. Verifique o IP, porta, credenciais e permissões.`,
         error: dbConnectionError
       };
     }
@@ -308,59 +388,59 @@ export async function initDatabaseConnection(): Promise<DbStatusInfo> {
 }
 
 async function autoCreatePgTables(pool: pg.Pool) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS categories (
+      id VARCHAR(64) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      description TEXT,
+      color VARCHAR(32) DEFAULT '#4f46e5',
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id VARCHAR(64) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      cnpj_cpf VARCHAR(32),
+      email VARCHAR(255),
+      phone VARCHAR(64),
+      contact_person VARCHAR(255),
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS products (
+      id VARCHAR(64) PRIMARY KEY,
+      sku VARCHAR(64) UNIQUE NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      description TEXT,
+      category_id VARCHAR(64) REFERENCES categories(id) ON DELETE SET NULL,
+      supplier_id VARCHAR(64) REFERENCES suppliers(id) ON DELETE SET NULL,
+      quantity INTEGER NOT NULL DEFAULT 0,
+      min_quantity INTEGER NOT NULL DEFAULT 5,
+      unit_cost NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+      sale_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+      unit_measure VARCHAR(32) DEFAULT 'UN',
+      location VARCHAR(128),
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS movements (
+      id VARCHAR(64) PRIMARY KEY,
+      product_id VARCHAR(64) REFERENCES products(id) ON DELETE CASCADE,
+      product_name VARCHAR(255) NOT NULL,
+      product_sku VARCHAR(64),
+      type VARCHAR(16) NOT NULL,
+      quantity INTEGER NOT NULL,
+      unit_price NUMERIC(12, 2) DEFAULT 0.00,
+      total_price NUMERIC(12, 2) DEFAULT 0.00,
+      reason VARCHAR(255),
+      user_name VARCHAR(128) DEFAULT 'Sistema',
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // Check if empty, seed if so
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS categories (
-        id VARCHAR(64) PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        description TEXT,
-        color VARCHAR(32) DEFAULT '#3b82f6',
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS suppliers (
-        id VARCHAR(64) PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        cnpj_cpf VARCHAR(32),
-        email VARCHAR(255),
-        phone VARCHAR(64),
-        contact_person VARCHAR(255),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS products (
-        id VARCHAR(64) PRIMARY KEY,
-        sku VARCHAR(64) UNIQUE NOT NULL,
-        name VARCHAR(255) NOT NULL,
-        description TEXT,
-        category_id VARCHAR(64) REFERENCES categories(id) ON DELETE SET NULL,
-        supplier_id VARCHAR(64) REFERENCES suppliers(id) ON DELETE SET NULL,
-        quantity INTEGER NOT NULL DEFAULT 0,
-        min_quantity INTEGER NOT NULL DEFAULT 5,
-        unit_cost NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-        sale_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-        unit_measure VARCHAR(32) DEFAULT 'UN',
-        location VARCHAR(128),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS movements (
-        id VARCHAR(64) PRIMARY KEY,
-        product_id VARCHAR(64) REFERENCES products(id) ON DELETE CASCADE,
-        product_name VARCHAR(255) NOT NULL,
-        product_sku VARCHAR(64),
-        type VARCHAR(16) NOT NULL,
-        quantity INTEGER NOT NULL,
-        unit_price NUMERIC(12, 2) DEFAULT 0.00,
-        total_price NUMERIC(12, 2) DEFAULT 0.00,
-        reason VARCHAR(255),
-        user_name VARCHAR(128) DEFAULT 'Sistema',
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Check if empty, seed if so
     const countRes = await pool.query('SELECT COUNT(*) FROM products');
     if (parseInt(countRes.rows[0].count, 10) === 0) {
       console.log('Semeando dados iniciais no PostgreSQL...');
@@ -398,67 +478,81 @@ async function autoCreatePgTables(pool: pg.Pool) {
         );
       }
     }
-  } catch (err) {
-    console.error('Erro ao criar tabelas no PostgreSQL:', err);
+  } catch (e) {
+    console.warn('Semeamento automático ignorado:', e);
   }
+
+  const res = await pool.query(`
+    SELECT table_name 
+    FROM information_schema.tables 
+    WHERE table_schema = 'public' 
+    AND table_name IN ('products', 'categories', 'suppliers', 'movements')
+  `);
+  const foundTables = res.rows.map(r => r.table_name);
+  return {
+    products: foundTables.includes('products'),
+    categories: foundTables.includes('categories'),
+    suppliers: foundTables.includes('suppliers'),
+    movements: foundTables.includes('movements')
+  };
 }
 
-async function autoCreateMysqlTables(pool: mysql.Pool) {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS categories (
-        id VARCHAR(64) PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        description TEXT,
-        color VARCHAR(32) DEFAULT '#3b82f6',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS suppliers (
-        id VARCHAR(64) PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        cnpj_cpf VARCHAR(32),
-        email VARCHAR(255),
-        phone VARCHAR(64),
-        contact_person VARCHAR(255),
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS products (
-        id VARCHAR(64) PRIMARY KEY,
-        sku VARCHAR(64) UNIQUE NOT NULL,
-        name VARCHAR(255) NOT NULL,
-        description TEXT,
-        category_id VARCHAR(64),
-        supplier_id VARCHAR(64),
-        quantity INT NOT NULL DEFAULT 0,
-        min_quantity INT NOT NULL DEFAULT 5,
-        unit_cost DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
-        sale_price DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
-        unit_measure VARCHAR(32) DEFAULT 'UN',
-        location VARCHAR(128),
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS movements (
-        id VARCHAR(64) PRIMARY KEY,
-        product_id VARCHAR(64),
-        product_name VARCHAR(255) NOT NULL,
-        product_sku VARCHAR(64),
-        type VARCHAR(16) NOT NULL,
-        quantity INT NOT NULL,
-        unit_price DECIMAL(12, 2) DEFAULT 0.00,
-        total_price DECIMAL(12, 2) DEFAULT 0.00,
-        reason VARCHAR(255),
-        user_name VARCHAR(128) DEFAULT 'Sistema',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
+async function autoCreateMysqlTables(pool: mysql.Pool, dbName: string) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS categories (
+      id VARCHAR(64) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      description TEXT,
+      color VARCHAR(32) DEFAULT '#4f46e5',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id VARCHAR(64) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      cnpj_cpf VARCHAR(32),
+      email VARCHAR(255),
+      phone VARCHAR(64),
+      contact_person VARCHAR(255),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS products (
+      id VARCHAR(64) PRIMARY KEY,
+      sku VARCHAR(64) UNIQUE NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      description TEXT,
+      category_id VARCHAR(64),
+      supplier_id VARCHAR(64),
+      quantity INT NOT NULL DEFAULT 0,
+      min_quantity INT NOT NULL DEFAULT 5,
+      unit_cost DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+      sale_price DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+      unit_measure VARCHAR(32) DEFAULT 'UN',
+      location VARCHAR(128),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS movements (
+      id VARCHAR(64) PRIMARY KEY,
+      product_id VARCHAR(64),
+      product_name VARCHAR(255) NOT NULL,
+      product_sku VARCHAR(64),
+      type VARCHAR(16) NOT NULL,
+      quantity INT NOT NULL,
+      unit_price DECIMAL(12, 2) DEFAULT 0.00,
+      total_price DECIMAL(12, 2) DEFAULT 0.00,
+      reason VARCHAR(255),
+      user_name VARCHAR(128) DEFAULT 'Sistema',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
 
+  try {
     const [rows]: any = await pool.query('SELECT COUNT(*) as cnt FROM products');
     if (rows && rows[0] && rows[0].cnt === 0) {
       console.log('Semeando dados iniciais no MySQL...');
@@ -483,9 +577,23 @@ async function autoCreateMysqlTables(pool: mysql.Pool) {
         );
       }
     }
-  } catch (err) {
-    console.error('Erro ao criar tabelas no MySQL:', err);
+  } catch (e) {
+    console.warn('Semeamento automático ignorado no MySQL:', e);
   }
+
+  const [tRows]: any = await pool.query(`
+    SELECT TABLE_NAME 
+    FROM information_schema.tables 
+    WHERE TABLE_SCHEMA = ? 
+    AND TABLE_NAME IN ('products', 'categories', 'suppliers', 'movements')
+  `, [dbName]);
+  const foundTables = (tRows || []).map((r: any) => r.TABLE_NAME || r.table_name);
+  return {
+    products: foundTables.includes('products'),
+    categories: foundTables.includes('categories'),
+    suppliers: foundTables.includes('suppliers'),
+    movements: foundTables.includes('movements')
+  };
 }
 
 // Data Access Object Functions

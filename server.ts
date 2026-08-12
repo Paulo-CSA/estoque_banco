@@ -1,7 +1,9 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
+import dotenv from 'dotenv';
 import {
   initDatabaseConnection,
   getDbConfigFromEnv,
@@ -25,7 +27,7 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = 7000;
 
   app.use(express.json());
 
@@ -36,21 +38,25 @@ async function startServer() {
 
   // 1. Database Diagnostic & Connection Test API
   app.get('/api/db/status', async (req, res) => {
+    // Re-verify current config from environment
+    const config = getDbConfigFromEnv();
     res.json({
       ...dbStatus,
       envConfig: {
-        host: process.env.DB_HOST || '',
-        port: process.env.DB_PORT || '5432',
-        database: process.env.DB_NAME || '',
-        user: process.env.DB_USER || '',
-        type: process.env.DB_TYPE || 'postgres',
-        hasPassword: Boolean(process.env.DB_PASSWORD)
+        host: config.host || '',
+        port: config.port || 5432,
+        database: config.database || '',
+        user: config.user || '',
+        type: config.type || 'postgres',
+        hasPassword: Boolean(config.password)
       }
     });
   });
 
   app.post('/api/db/reconnect', async (req, res) => {
     try {
+      // Reload .env file dynamically if changed
+      dotenv.config({ override: true });
       dbStatus = await initDatabaseConnection();
       res.json({ success: true, dbStatus });
     } catch (err: any) {
