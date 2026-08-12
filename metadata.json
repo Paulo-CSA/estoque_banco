@@ -1,0 +1,6 @@
+{
+  "name": "Controle de Estoque",
+  "description": "Sistema de gestão e controle de estoque com suporte a banco de dados externo (PostgreSQL / MySQL)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
