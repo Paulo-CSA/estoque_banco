@@ -27,7 +27,7 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = 7000;
+  const PORT = 3000;
 
   app.use(express.json());
 
