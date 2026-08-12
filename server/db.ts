@@ -28,101 +28,41 @@ export interface DbStatusInfo {
   };
 }
 
-// In-memory / local fallback storage
-let localCategories = [
-  { id: 'cat-1', name: 'Eletrônicos', description: 'Componentes e dispositivos eletrônicos', color: '#4f46e5', created_at: new Date().toISOString() },
-  { id: 'cat-2', name: 'Escritório', description: 'Materiais e suprimentos para escritório', color: '#10b981', created_at: new Date().toISOString() },
-  { id: 'cat-3', name: 'Informática', description: 'Periféricos e computadores', color: '#8b5cf6', created_at: new Date().toISOString() },
-  { id: 'cat-4', name: 'Embalagens', description: 'Caixas, fitas e proteção', color: '#f59e0b', created_at: new Date().toISOString() },
-];
+// In-memory / local fallback storage (starts empty)
+let localCategories: Array<{
+  id: string;
+  name: string;
+  description?: string;
+  color?: string;
+  created_at?: string;
+}> = [];
 
-let localSuppliers = [
-  { id: 'sup-1', name: 'TechDistribuidora Ltda', cnpj_cpf: '12.345.678/0001-90', email: 'vendas@techdist.com.br', phone: '(11) 3344-5566', contact_person: 'Carlos Silva', created_at: new Date().toISOString() },
-  { id: 'sup-2', name: 'Suprimentos Brasil S.A.', cnpj_cpf: '98.765.432/0001-10', email: 'contato@suprimentosbr.com', phone: '(11) 2233-4455', contact_person: 'Ana Paula', created_at: new Date().toISOString() },
-];
+let localSuppliers: Array<{
+  id: string;
+  name: string;
+  cnpj_cpf?: string;
+  email?: string;
+  phone?: string;
+  contact_person?: string;
+  created_at?: string;
+}> = [];
 
-let localProducts = [
-  {
-    id: 'prod-1',
-    sku: 'ELE-001',
-    name: 'Teclado Mecânico RGB',
-    description: 'Teclado mecânico com switches azuis e retroiluminação RGB',
-    category_id: 'cat-3',
-    supplier_id: 'sup-1',
-    quantity: 25,
-    min_quantity: 10,
-    unit_cost: 120.00,
-    sale_price: 249.90,
-    unit_measure: 'UN',
-    location: 'Prateleira A-12',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  },
-  {
-    id: 'prod-2',
-    sku: 'ELE-002',
-    name: 'Mouse Óptico Sem Fio 1600 DPI',
-    description: 'Mouse ergonômico wireless com receptor USB',
-    category_id: 'cat-3',
-    supplier_id: 'sup-1',
-    quantity: 8,
-    min_quantity: 15,
-    unit_cost: 35.00,
-    sale_price: 79.90,
-    unit_measure: 'UN',
-    location: 'Prateleira A-14',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  },
-  {
-    id: 'prod-3',
-    sku: 'ESC-001',
-    name: 'Papel Sulfite A4 75g (Pacote 500fls)',
-    description: 'Papel de alta alvura para impressões do dia a dia',
-    category_id: 'cat-2',
-    supplier_id: 'sup-2',
-    quantity: 0,
-    min_quantity: 20,
-    unit_cost: 22.50,
-    sale_price: 32.90,
-    unit_measure: 'CX',
-    location: 'Depósito 2 - Setor B',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  },
-  {
-    id: 'prod-4',
-    sku: 'ESC-002',
-    name: 'Cadeira Ergonômica de Escritório',
-    description: 'Cadeira presidente com ajuste lombar e braços reguláveis',
-    category_id: 'cat-2',
-    supplier_id: 'sup-2',
-    quantity: 14,
-    min_quantity: 5,
-    unit_cost: 450.00,
-    sale_price: 890.00,
-    unit_measure: 'UN',
-    location: 'Showroom 1',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  },
-  {
-    id: 'prod-5',
-    sku: 'EMB-001',
-    name: 'Caixa de Papelão 30x20x15cm (Fardo c/ 25)',
-    description: 'Caixas reforçadas para e-commerce e envios',
-    category_id: 'cat-4',
-    supplier_id: 'sup-2',
-    quantity: 45,
-    min_quantity: 10,
-    unit_cost: 42.00,
-    sale_price: 75.00,
-    unit_measure: 'PACOTE',
-    location: 'Depósito 1 - Prateleira F',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  }
-];
+let localProducts: Array<{
+  id: string;
+  sku: string;
+  name: string;
+  description?: string;
+  category_id?: string;
+  supplier_id?: string;
+  quantity: number;
+  min_quantity: number;
+  unit_cost: number;
+  sale_price: number;
+  unit_measure?: string;
+  location?: string;
+  created_at?: string;
+  updated_at?: string;
+}> = [];
 
 let localMovements: Array<{
   id: string;
@@ -136,47 +76,7 @@ let localMovements: Array<{
   reason: string;
   user_name: string;
   created_at: string;
-}> = [
-  {
-    id: 'mov-1',
-    product_id: 'prod-1',
-    product_name: 'Teclado Mecânico RGB',
-    product_sku: 'ELE-001',
-    type: 'ENTRADA' as const,
-    quantity: 30,
-    unit_price: 120.00,
-    total_price: 3600.00,
-    reason: 'Compra inicial de estoque - NF 4421',
-    user_name: 'Administrador',
-    created_at: new Date(Date.now() - 86400000 * 3).toISOString()
-  },
-  {
-    id: 'mov-2',
-    product_id: 'prod-1',
-    product_name: 'Teclado Mecânico RGB',
-    product_sku: 'ELE-001',
-    type: 'SAIDA' as const,
-    quantity: 5,
-    unit_price: 249.90,
-    total_price: 1249.50,
-    reason: 'Venda Pedido #1029',
-    user_name: 'Atendente Vendas',
-    created_at: new Date(Date.now() - 86400000 * 1).toISOString()
-  },
-  {
-    id: 'mov-3',
-    product_id: 'prod-2',
-    product_name: 'Mouse Óptico Sem Fio 1600 DPI',
-    product_sku: 'ELE-002',
-    type: 'SAIDA' as const,
-    quantity: 12,
-    unit_price: 79.90,
-    total_price: 958.80,
-    reason: 'Venda Pedido #1033',
-    user_name: 'Atendente Vendas',
-    created_at: new Date(Date.now() - 3600000 * 4).toISOString()
-  }
-];
+}> = [];
 
 let pgPool: pg.Pool | null = null;
 let mysqlPool: mysql.Pool | null = null;
@@ -388,6 +288,7 @@ export async function initDatabaseConnection(): Promise<DbStatusInfo> {
 }
 
 async function autoCreatePgTables(pool: pg.Pool) {
+  // Auto create tables for PostgreSQL
   await pool.query(`
     CREATE TABLE IF NOT EXISTS categories (
       id VARCHAR(64) PRIMARY KEY,
@@ -438,49 +339,6 @@ async function autoCreatePgTables(pool: pg.Pool) {
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
   `);
-
-  // Check if empty, seed if so
-  try {
-    const countRes = await pool.query('SELECT COUNT(*) FROM products');
-    if (parseInt(countRes.rows[0].count, 10) === 0) {
-      console.log('Semeando dados iniciais no PostgreSQL...');
-      for (const cat of localCategories) {
-        await pool.query(
-          'INSERT INTO categories (id, name, description, color, created_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING',
-          [cat.id, cat.name, cat.description, cat.color, cat.created_at]
-        );
-      }
-      for (const sup of localSuppliers) {
-        await pool.query(
-          'INSERT INTO suppliers (id, name, cnpj_cpf, email, phone, contact_person, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING',
-          [sup.id, sup.name, sup.cnpj_cpf, sup.email, sup.phone, sup.contact_person, sup.created_at]
-        );
-      }
-      for (const prod of localProducts) {
-        await pool.query(
-          `INSERT INTO products (id, sku, name, description, category_id, supplier_id, quantity, min_quantity, unit_cost, sale_price, unit_measure, location, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) ON CONFLICT DO NOTHING`,
-          [
-            prod.id, prod.sku, prod.name, prod.description, prod.category_id, prod.supplier_id,
-            prod.quantity, prod.min_quantity, prod.unit_cost, prod.sale_price, prod.unit_measure,
-            prod.location, prod.created_at, prod.updated_at
-          ]
-        );
-      }
-      for (const mov of localMovements) {
-        await pool.query(
-          `INSERT INTO movements (id, product_id, product_name, product_sku, type, quantity, unit_price, total_price, reason, user_name, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) ON CONFLICT DO NOTHING`,
-          [
-            mov.id, mov.product_id, mov.product_name, mov.product_sku, mov.type,
-            mov.quantity, mov.unit_price, mov.total_price, mov.reason, mov.user_name, mov.created_at
-          ]
-        );
-      }
-    }
-  } catch (e) {
-    console.warn('Semeamento automático ignorado:', e);
-  }
 
   const res = await pool.query(`
     SELECT table_name 
@@ -551,35 +409,6 @@ async function autoCreateMysqlTables(pool: mysql.Pool, dbName: string) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
-
-  try {
-    const [rows]: any = await pool.query('SELECT COUNT(*) as cnt FROM products');
-    if (rows && rows[0] && rows[0].cnt === 0) {
-      console.log('Semeando dados iniciais no MySQL...');
-      for (const cat of localCategories) {
-        await pool.query('INSERT IGNORE INTO categories (id, name, description, color) VALUES (?, ?, ?, ?)', [cat.id, cat.name, cat.description, cat.color]);
-      }
-      for (const sup of localSuppliers) {
-        await pool.query('INSERT IGNORE INTO suppliers (id, name, cnpj_cpf, email, phone, contact_person) VALUES (?, ?, ?, ?, ?, ?)', [sup.id, sup.name, sup.cnpj_cpf, sup.email, sup.phone, sup.contact_person]);
-      }
-      for (const prod of localProducts) {
-        await pool.query(
-          `INSERT IGNORE INTO products (id, sku, name, description, category_id, supplier_id, quantity, min_quantity, unit_cost, sale_price, unit_measure, location)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [prod.id, prod.sku, prod.name, prod.description, prod.category_id, prod.supplier_id, prod.quantity, prod.min_quantity, prod.unit_cost, prod.sale_price, prod.unit_measure, prod.location]
-        );
-      }
-      for (const mov of localMovements) {
-        await pool.query(
-          `INSERT IGNORE INTO movements (id, product_id, product_name, product_sku, type, quantity, unit_price, total_price, reason, user_name)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [mov.id, mov.product_id, mov.product_name, mov.product_sku, mov.type, mov.quantity, mov.unit_price, mov.total_price, mov.reason, mov.user_name]
-        );
-      }
-    }
-  } catch (e) {
-    console.warn('Semeamento automático ignorado no MySQL:', e);
-  }
 
   const [tRows]: any = await pool.query(`
     SELECT TABLE_NAME 

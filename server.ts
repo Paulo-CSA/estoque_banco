@@ -27,6 +27,7 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
+  // PORT 3000 is required by the Cloud Run reverse proxy
   const PORT = 3000;
 
   app.use(express.json());
